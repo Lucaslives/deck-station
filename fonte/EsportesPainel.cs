@@ -49,6 +49,7 @@ partial class PanelForm {
         sportWake.WaitOne(2000);
       }
     }) { IsBackground = true, Name = "esportes" }.Start();
+    UpdateRain();
     Invalidate();
   }
 
@@ -57,6 +58,7 @@ partial class PanelForm {
     sports = false;
     sportDrag = false;
     sportWake.Set();
+    UpdateRain();
     Invalidate();
   }
 
@@ -152,7 +154,7 @@ partial class PanelForm {
       }
 
       var oldClip = g.Clip;
-      g.SetClip(sportArea);
+      g.SetClip(sportArea, System.Drawing.Drawing2D.CombineMode.Intersect);   // Intersect: respeita o pedaco sendo redesenhado
       var a = new Rectangle(sportArea.X, sportArea.Y - sportScroll, sportArea.Width, sportArea.Height);
       if (def.Wiki != null) sportContentH = DrawGames(g, d, a, pad, dimBr, line);
       else if (sportView == 0) sportContentH = DrawStandings(g, d, a, pad, dimBr, accent);

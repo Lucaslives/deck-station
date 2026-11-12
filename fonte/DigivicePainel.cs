@@ -1,8 +1,9 @@
 ﻿// ===========================================================================
 //  Aba Digivice: o mundo 3D do Digivice, sem controle (estilo tamagotchi), roda
 //  em digivice\Digivice-Tablet.exe e a janela dele fica dentro do painel,
-//  ocupando toda a area embaixo das abas. Trocar de aba so esconde a janela:
-//  o bichinho continua vivo. Toque nela nao tira o foco do jogo da frente.
+//  ocupando toda a area embaixo das abas. Sair da aba fecha o jogo (ele salva
+//  ao fechar), para nao gastar o PC em segundo plano. Toque nela nao tira o
+//  foco do jogo da frente.
 // ===========================================================================
 using System;
 using System.Diagnostics;
@@ -47,22 +48,25 @@ partial class PanelForm {
     digiError = "";
     if (digiWnd != IntPtr.Zero) ShowWindow(digiWnd, SW_SHOWNOACTIVATE);
     else if (digiProc == null) StartDigi();
+    UpdateRain();   // a chuva fica atras do jogo: para
     Invalidate();
   }
 
   void CloseDigi() {
     if (!digi) return;
     digi = false;
-    if (digiWnd != IntPtr.Zero) ShowWindow(digiWnd, SW_HIDE);
+    StopDigi(false);
+    UpdateRain();
     Invalidate();
   }
 
   void StartDigi() {
     string exe = Path.Combine(app.Dir, "digivice", DigiProcess + ".exe");
     if (!File.Exists(exe)) { digiError = "Nao achei " + exe; return; }
-    // sobra de uma execucao que caiu: a janela dela morreu junto com o painel
+    // o anterior ainda salvando (aba trocada agora) ou sobra de uma execucao
+    // que caiu: espera um pouco e fecha
     foreach (var old in Process.GetProcessesByName(DigiProcess)) {
-      try { old.Kill(); } catch { }
+      try { if (!old.WaitForExit(1500)) old.Kill(); } catch { }
       old.Dispose();
     }
     try {
@@ -130,16 +134,25 @@ partial class PanelForm {
     if (digiWnd != IntPtr.Zero) MoveWindow(digiWnd, digiRect.X, digiRect.Y, digiRect.Width, digiRect.Height, true);
   }
 
-  // fechar o programa: pede para o jogo salvar e sair
-  public void StopDigi() {
+  // pede para o jogo salvar e sair; se nao sair em 3 s, fecha a forca.
+  // wait = false (troca de aba): espera em segundo plano, sem travar o painel
+  public void StopDigi(bool wait = true) {
     if (digiTimer != null) digiTimer.Stop();
-    if (digiProc == null) return;
-    try {
-      if (digiWnd != IntPtr.Zero) PostMessage(digiWnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
-      if (!digiProc.WaitForExit(2000)) digiProc.Kill();
-    } catch { }
+    var proc = digiProc;
+    IntPtr wnd = digiWnd;
     digiProc = null;
     digiWnd = IntPtr.Zero;
+    if (proc == null) return;
+    if (wnd != IntPtr.Zero) {
+      ShowWindow(wnd, SW_HIDE);
+      PostMessage(wnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+    }
+    Action finish = () => {
+      try { if (!proc.WaitForExit(3000)) proc.Kill(); } catch { }
+      proc.Dispose();
+    };
+    if (wait) finish();
+    else new System.Threading.Thread(() => finish()) { IsBackground = true }.Start();
   }
 
   void DrawDigi(Graphics g) {

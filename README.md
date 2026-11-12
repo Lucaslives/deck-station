@@ -6,7 +6,7 @@ Transforma um celular ou tablet em um painel de atalhos para o PC, usando o [spa
 
 ## Downloads
 
-Baixe o **Deck-Station-v1.0.zip** na página de **Releases**.
+Baixe o **Deck-Station-v1.1.zip** na página de **Releases**.
 
 ## O que ele faz
 

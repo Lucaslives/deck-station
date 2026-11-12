@@ -58,9 +58,19 @@ partial class PanelForm : Form {
     BackColor = KeyArt.Bg;
     Icon = DeckApp.MakeTrayIcon();
     animTimer.Tick += (s, e) => AnimTick();
-    tick.Tick += (s, e) => { blinkOn = !blinkOn; Invalidate(); };
+    // pisca so o ponto das teclas "no ar" (antes redesenhava o painel todo 2x por segundo)
+    tick.Tick += (s, e) => {
+      blinkOn = !blinkOn;
+      // "Fechar?", borda de erro e aviso somem sozinhos: redesenha quando expiram
+      var ago = DateTime.Now.AddSeconds(-1);
+      bool expiring = closeArmedUntil > ago || noticeUntil > ago;
+      for (int i = 0; i < 12; i++) if (errUntil[i] > ago) expiring = true;
+      if (expiring) { Invalidate(); return; }
+      if (mixer || sports || digi) return;
+      for (int i = 0; i < 12; i++) if (keyState[i] == 3) Invalidate(keyRects[i]);
+    };
     tick.Start();
-    mixTimer.Tick += (s, e) => { if (mixer) Invalidate(); };
+    mixTimer.Tick += (s, e) => MixerTick();
     paintRetry.Tick += (s, e) => { paintRetry.Stop(); Invalidate(); };
     cursorTimer.Tick += (s, e) => TrackCursor();
     cursorTimer.Start();
@@ -356,10 +366,37 @@ partial class PanelForm : Form {
   readonly Timer paintRetry = new Timer { Interval = 500 };
   DateTime lastPaintLog;
 
+  // medidor: quanto tempo o painel gasta desenhando (vai para o log a cada minuto)
+  readonly System.Diagnostics.Stopwatch perfWatch = System.Diagnostics.Stopwatch.StartNew();
+  double perfPaintMs, perfMaxMs, perfUiMs;
+  int perfFrames, perfUi;
+  TimeSpan perfCpu0 = System.Diagnostics.Process.GetCurrentProcess().TotalProcessorTime;
+
+  void PerfCount(double ms) {
+    perfFrames++;
+    perfPaintMs += ms;
+    if (ms > perfMaxMs) perfMaxMs = ms;
+    double secs = perfWatch.Elapsed.TotalSeconds;
+    if (secs < 60) return;
+    var cpuNow = System.Diagnostics.Process.GetCurrentProcess().TotalProcessorTime;
+    string aba = digi ? "digivice" : mixer ? "mixer" : sports ? "esportes" : "teclas";
+    double cpuPct = (cpuNow - perfCpu0).TotalSeconds / secs * 100;
+    // so registra quando pesou (mais de 15% de um nucleo no minuto)
+    if (cpuPct > 15)
+      app.Log(string.Format("PESADO ({0}): CPU {1:0.0}% de um nucleo, {2} quadros, {3:0.0} ms em media, pior {4:0} ms, teclas refeitas {5}x ({6:0.0} ms cada)",
+        aba, cpuPct, perfFrames, perfPaintMs / perfFrames, perfMaxMs, perfUi, perfUi > 0 ? perfUiMs / perfUi : 0));
+    perfCpu0 = cpuNow;
+    perfWatch.Restart();
+    perfPaintMs = perfMaxMs = perfUiMs = 0;
+    perfFrames = perfUi = 0;
+  }
+
   protected override void OnPaint(PaintEventArgs e) {
     try {
       if (FailNextPaint) { FailNextPaint = false; throw new InvalidOperationException("erro de teste"); }
+      long t0 = perfWatch.ElapsedTicks;
       Draw(e.Graphics);
+      PerfCount((perfWatch.ElapsedTicks - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
     } catch (Exception ex) {
       if ((DateTime.Now - lastPaintLog).TotalSeconds > 30) {
         lastPaintLog = DateTime.Now;

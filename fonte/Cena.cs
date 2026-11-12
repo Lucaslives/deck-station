@@ -28,10 +28,28 @@ partial class PanelForm {
   float flash;          // relampago (0..1)
   int flashFrame = -1, nextFlash = 400;
 
-  // qualquer Invalidate que nao seja da chuva = algo mudou nas teclas/abas
+  // qualquer Invalidate que nao seja da chuva = algo mudou nas teclas/abas.
+  // Guarda so o pedaco que mudou: a camada das teclas e refeita so ali
+  // (o relogio, um medidor do mixer...) em vez da tela toda.
+  Rectangle uiDirtyRect;
   protected override void OnInvalidated(InvalidateEventArgs e) {
     base.OnInvalidated(e);
-    if (!rainTick) uiDirty = true;
+    if (rainTick) return;
+    // uiDirty com retangulo vazio = refazer tudo
+    if (!uiDirty) uiDirtyRect = e.InvalidRect;
+    else if (!uiDirtyRect.IsEmpty) uiDirtyRect = Rectangle.Union(uiDirtyRect, e.InvalidRect);
+    uiDirty = true;
+  }
+
+  // a chuva so anima nas teclas: no Digivice fica atras do jogo e na mesa de
+  // som e nos esportes fica atras do fundo escuro (gastava CPU sem aparecer)
+  void UpdateRain() {
+    bool on = KeyArt.HasScene && sceneBg != null && !digi && !mixer && !sports;
+    if (on && !rainTimer.Enabled) {
+      rainTimer.Tick -= RainTick;
+      rainTimer.Tick += RainTick;
+      rainTimer.Start();
+    } else if (!on) rainTimer.Stop();
   }
 
   bool EnsureScene() {
@@ -70,6 +88,7 @@ partial class PanelForm {
       sceneSkin = KeyArt.Skin;
       MakeRain(w, h);
       uiDirty = true;
+      uiDirtyRect = Rectangle.Empty;
       return true;
     } catch {
       DisposeScene();
@@ -122,11 +141,7 @@ partial class PanelForm {
       drops[i] = NewDrop(w, h, i >= 140);
       drops[i].Y = (float)(rnd.NextDouble() * (h + 200)) - 100;
     }
-    if (!rainTimer.Enabled) {
-      rainTimer.Tick -= RainTick;
-      rainTimer.Tick += RainTick;
-      rainTimer.Start();
-    }
+    UpdateRain();
   }
 
   Drop NewDrop(int w, int h, bool near) {
@@ -143,7 +158,7 @@ partial class PanelForm {
   const float Lean = 0.3f;   // inclinacao da chuva (igual a arte)
 
   void RainTick(object s, EventArgs e) {
-    if (!KeyArt.HasScene || sceneBg == null) { rainTimer.Stop(); return; }
+    if (!KeyArt.HasScene || sceneBg == null || digi || mixer || sports) { rainTimer.Stop(); return; }
     if (!Visible) return;
     int w = sceneSize.Width, h = sceneSize.Height;
     for (int i = 0; i < drops.Length; i++) {
@@ -190,12 +205,17 @@ partial class PanelForm {
       using (var br = new SolidBrush(Color.FromArgb((int)(70 * flash), 255, 40, 60))) g.FillRectangle(br, 0, 0, sceneSize.Width, sceneSize.Height);
     DrawRain(g, false);
     if (uiDirty) {
+      long t0 = perfWatch.ElapsedTicks;
       using (var ug = Graphics.FromImage(uiLayer)) {
+        if (!uiDirtyRect.IsEmpty) ug.SetClip(uiDirtyRect);
         ug.Clear(Color.Transparent);
         Quality(ug);
         DrawUi(ug);
       }
       uiDirty = false;
+      uiDirtyRect = Rectangle.Empty;
+      perfUi++;
+      perfUiMs += (perfWatch.ElapsedTicks - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
     }
     g.DrawImage(uiLayer, 0, 0, sceneSize.Width, sceneSize.Height);
     g.InterpolationMode = old;

@@ -19,7 +19,7 @@ partial class PanelForm {
   int mixPage;
 
   // retangulos do ultimo desenho (para o toque)
-  class Strip { public MixerChannel Ch; public Rectangle Track, Fader, Mute; }
+  class Strip { public MixerChannel Ch; public Rectangle Track, Fader, Mute, Meter; }
   readonly List<Strip> strips = new List<Strip>();
   Rectangle mixBack, mixPrev, mixNext;
   readonly List<KeyValuePair<Rectangle, string>> outRects = new List<KeyValuePair<Rectangle, string>>();
@@ -55,7 +55,9 @@ partial class PanelForm {
       Obs.Meters(true);
       app.Touch("MESA");
     }
+    mixSig = "";
     mixTimer.Start();
+    UpdateRain();
     Invalidate();
   }
 
@@ -67,7 +69,31 @@ partial class PanelForm {
     if (pcMix) Audio.Mixer.Stop();
     else Obs.Meters(false);
     held.Clear();
+    UpdateRain();
     Invalidate();
+  }
+
+  // a cada quadro: so os medidores que estao mexendo sao redesenhados; o resto
+  // da mesa so quando algo muda (volume, mudo, app novo, saida de som)
+  string mixSig = "";
+  void MixerTick() {
+    if (!mixer) return;
+    string sig;
+    try {
+      var sb = new System.Text.StringBuilder();
+      foreach (var ch in MixList) sb.Append(ch.Name).Append('|').Append(ch.Db.ToString("0.0")).Append(ch.Muted ? 'm' : '-').Append(';');
+      if (pcMix) {
+        foreach (var o in Audio.Mixer.Outputs) sb.Append(o.Name).Append(o.Default ? '*' : '-');
+        sb.Append(Audio.Mixer.LastError);
+      } else sb.Append(Obs.Connected).Append(Obs.LastError);
+      sig = sb.ToString();
+    } catch { sig = mixSig + "?"; }   // lista trocando no meio da leitura
+    if (sig != mixSig) { mixSig = sig; Invalidate(); return; }
+    foreach (var s in strips) {
+      float hold;
+      held.TryGetValue(pcMix ? s.Ch.Id : s.Ch.Name, out hold);
+      if ((!s.Ch.Muted && Level(s.Ch) > 0.001f) || hold > 0.02f) Invalidate(s.Meter);
+    }
   }
 
   // fader: posicao 0..1 com curva cubica (meio do fader = -18 dB), igual ao medidor
@@ -211,9 +237,11 @@ partial class PanelForm {
     int knobH = Math.Max(18, (int)(barH * 0.34f));
     var fader = new Rectangle(r.X, ftop, r.Width, fbot - ftop);
     var track = new Rectangle(r.X, ftop + knobH / 2, r.Width, Math.Max(1, fbot - ftop - knobH));
-    strips.Add(new Strip { Ch = ch, Track = track, Fader = fader, Mute = mute });
-
     float cx = r.X + r.Width * 0.42f;
+    var meterBox = Rectangle.Ceiling(new RectangleF(cx + r.Width * 0.16f, track.Y, Math.Max(6, r.Width * 0.1f), track.Height));
+    meterBox.Inflate(2, 2);
+    strips.Add(new Strip { Ch = ch, Track = track, Fader = fader, Mute = mute, Meter = meterBox });
+
     float tw = Math.Max(4, barH * 0.07f);
     // marcas: dB na mesa do OBS (0, -6, -12...), % no mixer do PC
     int[] marks = pcMix ? new[] { 100, 75, 50, 25, 0 } : new[] { 0, -6, -12, -20, -30, -40, -60 };
